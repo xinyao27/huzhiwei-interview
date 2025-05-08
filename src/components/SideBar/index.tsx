@@ -44,6 +44,8 @@ export default function Sidebar({
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   // 要删除的对话ID
   const [conversationToDelete, setConversationToDelete] = useState<number | null>(null)
+  // 跟踪下拉菜单打开状态
+  const [menuOpenId, setMenuOpenId] = useState<number | string | null>(null)
 
   // 处理删除按钮点击
   const handleDeleteClick = (e: React.MouseEvent, id: number) => {
@@ -66,6 +68,15 @@ export default function Sidebar({
     setIsDeleteDialogOpen(false)
     setConversationToDelete(null)
   }
+
+  // 处理下拉菜单打开状态
+  const handleMenuOpenChange = (open: boolean, id: number | string) => {
+    if (open) {
+      setMenuOpenId(id);
+    } else {
+      setMenuOpenId(null);
+    }
+  };
 
   if (!isOpen) {
     return (
@@ -110,14 +121,19 @@ export default function Sidebar({
                 )}
                 onClick={() => typeof item.id === 'number' && onSelectConversation(item.id)}
                 onMouseEnter={() => setHoveredConversationId(item.id)}
-                onMouseLeave={() => setHoveredConversationId(null)}
+                onMouseLeave={() => {
+                  // 只有在菜单未打开时才清除悬停状态
+                  if (menuOpenId !== item.id) {
+                    setHoveredConversationId(null)
+                  }
+                }}
               >
                 <MessageSquare className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm truncate flex-1">{item.title}</span>
 
                 {/* 悬浮显示的三点图标和下拉菜单 */}
-                {(hoveredConversationId === item.id || item.active) && !item.isDateLabel && (
-                  <DropdownMenu>
+                {(hoveredConversationId === item.id || item.active || menuOpenId === item.id) && !item.isDateLabel && (
+                  <DropdownMenu onOpenChange={(open) => handleMenuOpenChange(open, item.id)}>
                     <DropdownMenuTrigger asChild>
                       <Button
                         variant="ghost"
