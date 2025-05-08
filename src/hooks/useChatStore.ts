@@ -1,14 +1,12 @@
 "use client"
 
-import type React from "react"
-
-import { useState, useEffect } from "react"
+import { useMemo, useState, useEffect, useCallback, useRef } from "react"
+import { useChat, type Message as VercelMessage } from "ai/react"
 
 // 定义对话类型
 export interface Conversation {
   id: number
   title: string
-  icon?: string
   active?: boolean
   updatedAt: number // 更新时间戳（秒）
   messages: {
@@ -17,8 +15,8 @@ export interface Conversation {
   }[]
 }
 
-// 定义消息类型
-export interface Message {
+// 定义本地消息类型
+export interface LocalMessage {
   role: "user" | "assistant"
   content: string
 }
@@ -89,106 +87,185 @@ export function useChatStore() {
   // 当前选中的对话ID
   const [currentConversationId, setCurrentConversationId] = useState(2)
 
-  // 当前对话的消息
-  const [currentMessages, setCurrentMessages] = useState<Message[]>([])
-
-  // 输入框的值
-  const [inputValue, setInputValue] = useState("")
-
   // 新建对话状态
   const [isCreatingNewChat, setIsCreatingNewChat] = useState(false)
 
   // 侧边栏状态
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
 
-  // 当选中的对话变化时，更新当前消息
+  // 用于跟踪是否应该更新对话
+  const shouldUpdateConversationsRef = useRef(true)
+  
+  // 上一次AI消息的长度
+  const lastAIMessagesLengthRef = useRef(0)
+
+  // 从Conversation转换为VercelMessage
+  const convertToMessages = useCallback((messages: LocalMessage[]): VercelMessage[] => {
+    return messages.map(msg => ({
+      id: crypto.randomUUID(),
+      role: msg.role,
+      content: msg.content,
+    }));
+  }, []);
+
+  // 从VercelMessage转换为LocalMessage
+  const convertToLocalMessages = useCallback((messages: VercelMessage[]): LocalMessage[] => {
+    return messages.map(msg => ({
+      role: msg.role as "user" | "assistant",
+      content: msg.content,
+    }));
+  }, []);
+
+  // 找到当前对话的初始消息
+  const initialMessages = useMemo(() => {
+    const conversation = conversations.find(conv => conv.id === currentConversationId);
+    return conversation 
+      ? convertToMessages(conversation.messages)
+      : [];
+  }, [currentConversationId, conversations, convertToMessages]);
+
+  // 使用Vercel的useChat hook
+  const {
+    messages: aiMessages,
+    input,
+    handleInputChange,
+    handleSubmit,
+    isLoading,
+    append,
+    reload,
+    setMessages
+  } = useChat({
+    api: "/api/agent", // 使用现有的API端点
+    id: currentConversationId.toString(),
+    initialMessages,
+    onResponse: (response: Response) => {
+      // 当收到响应时，更新对话列表中的对话
+      if (currentConversationId && shouldUpdateConversationsRef.current) {
+        const currentTimestamp = Math.floor(Date.now() / 1000);
+        
+        setConversations(prevConversations => 
+          prevConversations.map(conv => 
+            conv.id === currentConversationId 
+              ? { 
+                  ...conv, 
+                  messages: convertToLocalMessages(aiMessages), 
+                  updatedAt: currentTimestamp 
+                } 
+              : conv
+          )
+        )
+      }
+    }
+  })
+
+  // 当前对话的消息 - 从useChat中获取
+  const currentMessages = useMemo(() => 
+    convertToLocalMessages(aiMessages), [aiMessages, convertToLocalMessages]
+  )
+
+  // 监听当前对话ID变化
   useEffect(() => {
     const conversation = conversations.find((conv) => conv.id === currentConversationId)
     if (conversation && conversation.messages) {
-      setCurrentMessages(conversation.messages)
-    } else {
-      setCurrentMessages([])
+      // 暂时禁用更新对话，避免无限循环
+      shouldUpdateConversationsRef.current = false;
+      
+      // 重置useChat的消息，使用当前对话的消息
+      // 由于无法使用overrideMessages，使用setMessages替代
+      const msgs = convertToMessages(conversation.messages);
+      setMessages(msgs);
+      
+      // 重新启用更新对话
+      setTimeout(() => {
+        shouldUpdateConversationsRef.current = true;
+        lastAIMessagesLengthRef.current = msgs.length;
+      }, 100);
     }
-  }, [currentConversationId, conversations])
+  }, [currentConversationId, conversations, convertToMessages, setMessages])
+
+  // 监听aiMessages变化，避免不必要的状态更新
+  useEffect(() => {
+    // 只有当消息数量增加时才更新对话
+    if (aiMessages.length !== lastAIMessagesLengthRef.current && shouldUpdateConversationsRef.current) {
+      lastAIMessagesLengthRef.current = aiMessages.length;
+      
+      if (currentConversationId) {
+        const currentTimestamp = Math.floor(Date.now() / 1000);
+        
+        setConversations(prevConversations => 
+          prevConversations.map(conv => 
+            conv.id === currentConversationId 
+              ? { 
+                  ...conv, 
+                  messages: convertToLocalMessages(aiMessages), 
+                  updatedAt: currentTimestamp 
+                } 
+              : conv
+          )
+        )
+      }
+    }
+  }, [aiMessages, currentConversationId, convertToLocalMessages]);
 
   // 切换侧边栏
-  const toggleSidebar = () => {
-    setIsSidebarOpen(!isSidebarOpen)
-  }
+  const toggleSidebar = useCallback(() => {
+    setIsSidebarOpen(prev => !prev)
+  }, [])
 
-  // 发送消息
-  const handleSendMessage = (e: React.FormEvent) => {
+  // 重新生成回复
+  const handleRegenerate = useCallback(() => {
+    // 使用Vercel的reload函数重新生成最后一条消息
+    reload();
+  }, [reload])
+
+  // 发送消息 - 使用useChat的handleSubmit
+  const handleSendMessage = useCallback((e: React.FormEvent) => {
     e.preventDefault()
-    if (!inputValue.trim()) return
+    if (!input.trim()) return
 
-    const newMessages: Message[] = [...currentMessages, { role: "user", content: inputValue }]
-    setCurrentMessages(newMessages)
-
-    const currentTimestamp = Math.floor(Date.now() / 1000);
-
-    // 更新conversations中的消息和updatedAt
-    setConversations((prevConversations) =>
-      prevConversations.map((conv) => 
-        conv.id === currentConversationId 
-          ? { ...conv, messages: newMessages, updatedAt: currentTimestamp } 
-          : conv
-      ),
-    )
-
-    setInputValue("")
-
-    // 模拟AI回复
-    setTimeout(() => {
-      const responseMessages: Message[] = [
-        ...newMessages,
-        {
-          role: "assistant",
-          content: "我已收到您的消息，这是一个模拟回复。在实际应用中，这里会连接到OpenAI API获取真实回复。",
-        },
-      ]
-
-      setCurrentMessages(responseMessages)
-
-      // 更新conversations中的消息
-      setConversations((prevConversations) =>
-        prevConversations.map((conv) =>
-          conv.id === currentConversationId ? { ...conv, messages: responseMessages, updatedAt: currentTimestamp } : conv
-        ),
-      )
-    }, 1000)
-  }
+    // 使用useChat的handleSubmit
+    handleSubmit(e)
+  }, [input, handleSubmit])
 
   // 创建新对话
-  const handleNewChat = (message: string) => {
+  const handleNewChat = useCallback((message: string) => {
     // 创建新对话
     const newId = Math.max(...conversations.map((c) => c.id)) + 1
     const newConversation: Conversation = {
       id: newId,
       title: message.length > 20 ? message.substring(0, 20) + "..." : message,
-      icon: "pen",
       updatedAt: Math.floor(Date.now() / 1000), // 当前时间戳（秒）
-      messages: [
-        { role: "user", content: message },
-        {
-          role: "assistant",
-          content: "这是一个新的对话。我已收到您的消息，这是一个模拟回复。",
-        },
-      ],
+      messages: [],
     }
 
     // 更新所有对话，将之前的active设为false，新对话设为active
     setConversations((prevConversations) => [
       ...prevConversations.map((conv) => ({ ...conv, active: false })),
-      newConversation,
+      { ...newConversation, active: true },
     ])
 
     // 设置当前对话ID为新对话
     setCurrentConversationId(newId)
     setIsCreatingNewChat(false)
-  }
+
+    // 清空当前消息并发送第一条消息
+    shouldUpdateConversationsRef.current = false;
+    setMessages([]);
+    
+    setTimeout(() => {
+      shouldUpdateConversationsRef.current = true;
+      lastAIMessagesLengthRef.current = 0;
+      
+      append({ 
+        role: "user", 
+        content: message, 
+        id: crypto.randomUUID() 
+      })
+    }, 100)
+  }, [conversations, append, setMessages])
 
   // 选择对话
-  const handleSelectConversation = (id: number) => {
+  const handleSelectConversation = useCallback((id: number) => {
     const conversation = conversations.find((conv) => conv.id === id)
     if (conversation) {
       setCurrentConversationId(id)
@@ -206,15 +283,15 @@ export function useChatStore() {
         setIsCreatingNewChat(false)
       }
     }
-  }
+  }, [conversations, isCreatingNewChat])
 
   // 开始创建新对话
-  const startNewChat = () => {
+  const startNewChat = useCallback(() => {
     setIsCreatingNewChat(true)
-  }
+  }, [])
 
   // 删除对话
-  const handleDeleteConversation = (id: number) => {
+  const handleDeleteConversation = useCallback((id: number) => {
     // 过滤掉要删除的对话
     const newConversations = conversations.filter((conv) => conv.id !== id)
     setConversations(newConversations)
@@ -237,10 +314,10 @@ export function useChatStore() {
         setIsCreatingNewChat(true)
       }
     }
-  }
+  }, [conversations, currentConversationId])
 
   // 按照日期对对话进行分组
-  const getGroupedConversations = () => {
+  const getGroupedConversations = useCallback(() => {
     const now = Math.floor(Date.now() / 1000);
     const oneDayInSeconds = 86400; // 一天的秒数
     const twoDaysInSeconds = oneDayInSeconds * 2;
@@ -303,26 +380,31 @@ export function useChatStore() {
     }
 
     return groupedData;
-  };
+  }, [conversations]);
+
+  // 记忆分组对话结果，避免不必要的重新计算
+  const groupedConversations = useMemo(() => getGroupedConversations(), [getGroupedConversations]);
 
   return {
     // 状态
     conversations,
     currentConversationId,
     currentMessages,
-    inputValue,
+    inputValue: input,
     isCreatingNewChat,
     isSidebarOpen,
+    isLoading,
     // 用于UI展示的分组对话
-    groupedConversations: getGroupedConversations(),
+    groupedConversations,
 
     // 方法
-    setInputValue,
+    setInputValue: handleInputChange,
     toggleSidebar,
     handleSendMessage,
     handleNewChat,
     handleSelectConversation,
     startNewChat,
     handleDeleteConversation,
+    handleRegenerate,
   }
 }

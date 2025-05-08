@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { RotateCcw, Send, Plus, ArrowDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -10,6 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar } from "@/components/ui/avatar"
 import { cn } from "@/lib/utils"
 import { useScrollToBottom } from "@/hooks/useScrollToBottom"
+import Markdown from "@/components/markdown"
 
 interface Message {
   role: "user" | "assistant"
@@ -19,9 +20,11 @@ interface Message {
 interface ChatAreaProps {
   messages: Message[]
   inputValue: string
-  setInputValue: (value: string) => void
+  setInputValue: (e: React.ChangeEvent<HTMLInputElement> | React.ChangeEvent<HTMLTextAreaElement>) => void
   handleSendMessage: (e: React.FormEvent) => void
   isSidebarOpen: boolean
+  handleRegenerate?: () => void
+  isLoading?: boolean
 }
 
 export default function ChatArea({
@@ -30,12 +33,22 @@ export default function ChatArea({
   setInputValue,
   handleSendMessage,
   isSidebarOpen,
+  handleRegenerate,
+  isLoading = false,
 }: ChatAreaProps) {
   // 使用自定义 hook 处理滚动逻辑
   const { messagesEndRef, scrollAreaRef, showScrollButton, scrollToBottom } = useScrollToBottom([messages])
 
   // 用于追踪鼠标悬停的消息索引
   const [hoveredMessageIndex, setHoveredMessageIndex] = useState<number | null>(null)
+
+  // 渲染消息内容
+  const renderMessageContent = (message: Message) => {
+    if (message.role === "assistant") {
+      return <Markdown text={message.content} />
+    }
+    return <div className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</div>
+  }
 
   return (
     <div
@@ -61,14 +74,20 @@ export default function ChatArea({
                 </Avatar>
                 <div className="flex flex-col gap-1">
                   <div className="text-sm font-semibold">{message.role === "user" ? "你" : "gpt-4.1"}</div>
-                  <div className="text-sm leading-relaxed">{message.content}</div>
+                  {renderMessageContent(message)}
 
                   {message.role === "assistant" && (
                     <div className="flex gap-1 mt-2 h-7">
                       {/* 如果是最后一条消息或者鼠标悬停在消息上，才显示刷新按钮，但保持占位高度 */}
                       {(index === messages.length - 1 || hoveredMessageIndex === index) ? (
-                        <Button variant="ghost" size="icon" className="h-7 w-7 cursor-pointer">
-                          <RotateCcw className="h-4 w-4" />
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-7 w-7 cursor-pointer"
+                          onClick={handleRegenerate}
+                          disabled={isLoading}
+                        >
+                          <RotateCcw className={cn("h-4 w-4", isLoading && "animate-spin")} />
                         </Button>
                       ) : (
                         <div className="h-7 w-7"></div> // 空白占位符，保持高度
@@ -79,6 +98,25 @@ export default function ChatArea({
               </div>
             </div>
           ))}
+          
+          {/* 预先创建AI回复占位符 */}
+          {isLoading && messages.length > 0 && messages[messages.length - 1].role === "user" && (
+            <div className="flex gap-4 w-full justify-start">
+              <div className="flex gap-3 max-w-[80%]">
+                <Avatar className="h-8 w-8 flex-shrink-0">
+                  <div className="flex h-full w-full items-center justify-center bg-muted text-xs font-medium">
+                    AI
+                  </div>
+                </Avatar>
+                <div className="flex flex-col gap-1">
+                  <div className="text-sm font-semibold">gpt-4.1</div>
+                  <div className="text-sm leading-relaxed">
+                    <span className="inline-block animate-pulse">▋</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 这个空的div用于滚动到底部的目标 */}
           <div ref={messagesEndRef} />
@@ -101,7 +139,7 @@ export default function ChatArea({
           <div className="relative">
             <Textarea
               value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
+              onChange={setInputValue}
               placeholder="输入消息"
               className="min-h-[48px] pr-10 resize-none"
               onKeyDown={(e) => {
@@ -110,6 +148,7 @@ export default function ChatArea({
                   handleSendMessage(e)
                 }
               }}
+              disabled={isLoading}
             />
             <Button
               type="submit"
@@ -119,14 +158,14 @@ export default function ChatArea({
                 "absolute right-2 top-1/2 transform -translate-y-1/2 h-7 w-7",
                 !inputValue.trim() && "text-muted-foreground opacity-50",
               )}
-              disabled={!inputValue.trim()}
+              disabled={!inputValue.trim() || isLoading}
             >
               <Send className="h-4 w-4" />
             </Button>
           </div>
 
           <div className="flex items-center gap-2">
-            <Button type="button" variant="ghost" size="icon" className="h-8 w-8">
+            <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={isLoading}>
               <Plus className="h-4 w-4" />
             </Button>
           </div>

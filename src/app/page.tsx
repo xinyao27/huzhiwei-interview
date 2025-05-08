@@ -13,6 +13,7 @@ export default function ChatPage() {
     inputValue,
     isCreatingNewChat,
     isSidebarOpen,
+    isLoading,
 
     // 方法
     setInputValue,
@@ -22,6 +23,7 @@ export default function ChatPage() {
     handleSelectConversation,
     startNewChat,
     handleDeleteConversation,
+    handleRegenerate,
   } = useChatStore()
 
   return (
@@ -44,6 +46,8 @@ export default function ChatPage() {
           setInputValue={setInputValue}
           handleSendMessage={handleSendMessage}
           isSidebarOpen={isSidebarOpen}
+          handleRegenerate={handleRegenerate}
+          isLoading={isLoading}
         />
       )}
     </div>
