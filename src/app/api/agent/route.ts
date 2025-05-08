@@ -259,7 +259,6 @@ app.post('/agent', async (c) => {
           // 解析和修复代码块
           let processedContent = fullContent;
           
-          // 1. 检测和处理可能的代码块
           if (processedContent.includes('```')) {
             // 匹配代码块的正则表达式
             const codeBlockRegex = /```(\w*)([\s\S]*?)```/g;
@@ -276,35 +275,10 @@ app.post('/agent', async (c) => {
               // 确保代码块结束前有换行
               if (!fixedCode.endsWith('\n')) {
                 fixedCode += '\n';
-              }
-              
-              // 代码行之间应该有换行
-              // 针对JavaScript等常见语言的模式
-              fixedCode = fixedCode
-                // 函数定义后缺少换行
-                .replace(/\{(?!\s*\n)/g, '{\n')
-                // 语句结束后缺少换行
-                .replace(/;(?!\s*\n)/g, ';\n');
-              
-              // 处理常见代码行开始的模式，确保它们前面有换行
-              const commonLineStarts = [
-                'const ', 'let ', 'var ', 'function ', 'if ', 'for ', 'while ', 
-                'return ', 'class ', 'import ', 'export ', '//', 'console.'
-              ];
-              
-              for (const lineStart of commonLineStarts) {
-                const pattern = new RegExp(`([^\\n])${lineStart}`, 'g');
-                fixedCode = fixedCode.replace(pattern, `$1\n${lineStart}`);
-              }
-              
+              }          
               return '```' + language + fixedCode + '```';
             });
-          }
-          
-          // 2. 处理一般文本中的换行
-          // 将\n转义字符替换为真实换行符
-          processedContent = processedContent.replace(/\\n/g, '\n');
-          
+          }         
           await db
             .insert(messages)
             .values({
