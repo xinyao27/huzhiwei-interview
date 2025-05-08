@@ -1,36 +1,129 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## 数据库配置与使用
 
-## Getting Started
+本项目使用 DrizzleORM 和 SQLite 进行数据持久化存储。以下是数据库相关的使用说明：
 
-First, run the development server:
+### 数据库结构
+
+数据库包含以下表：
+
+- `conversations`: 存储对话信息
+  - `id`: 对话ID
+  - `title`: 对话标题
+  - `type`: 对话类型（可以是 'date' 或 undefined）
+  - `icon`: 图标类型（例如 'bot', 'pen' 等）
+  - `createdAt`: 创建时间
+  - `updatedAt`: 更新时间
+
+- `messages`: 存储消息内容
+  - `id`: 消息ID
+  - `conversationId`: 所属对话ID
+  - `role`: 消息角色（'user' 或 'assistant'）
+  - `content`: 消息内容
+  - `createdAt`: 创建时间
+  - `updatedAt`: 更新时间
+
+### 初始化数据库
+
+在首次运行项目时，需要初始化数据库：
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# 安装依赖（如果尚未安装）
+npm install
+
+# 生成数据库迁移文件
+npm run db:generate
+
+# 执行数据库迁移
+npm run db:migrate
+
+# 填充示例数据
+npm run db:seed
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+或者，也可以通过访问以下URL自动初始化数据库：
+```
+http://localhost:3000/api/init-db
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### API端点
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+项目提供了以下API端点用于与数据库交互：
 
-## Learn More
+#### 对话相关
 
-To learn more about Next.js, take a look at the following resources:
+- `GET /api/conversations`: 获取所有对话
+- `POST /api/conversations`: 创建新对话
+- `GET /api/conversations/:id`: 获取特定对话
+- `PUT /api/conversations/:id`: 更新对话
+- `DELETE /api/conversations/:id`: 删除对话
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+#### 消息相关
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `GET /api/conversations/:id/messages`: 获取特定对话的所有消息
+- `POST /api/conversations/:id/messages`: 添加新消息到对话
 
-## Deploy on Vercel
+### 数据库文件位置
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+SQLite数据库文件存储在项目根目录的 `db/chat.db` 文件中。
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### 前端与数据库集成
+
+要将前端与数据库集成，你可以在 `useChatStore` 钩子中添加数据库访问逻辑。下面是一个集成示例：
+
+```typescript
+// src/hooks/useChatStore.ts 中添加
+import { useEffect, useState } from "react";
+import type { Conversation, Message } from "@/lib/db";
+
+// 从API获取所有对话
+const fetchConversations = async () => {
+  const response = await fetch("/api/conversations");
+  if (!response.ok) throw new Error("获取对话失败");
+  return response.json();
+};
+
+// 获取特定对话的所有消息
+const fetchMessages = async (conversationId: number) => {
+  const response = await fetch(`/api/conversations/${conversationId}/messages`);
+  if (!response.ok) throw new Error("获取消息失败");
+  return response.json();
+};
+
+// 添加消息到对话
+const addMessage = async (conversationId: number, role: "user" | "assistant", content: string) => {
+  const response = await fetch(`/api/conversations/${conversationId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role, content }),
+  });
+  if (!response.ok) throw new Error("添加消息失败");
+  return response.json();
+};
+
+// 修改 useChatStore 中的方法，使用API
+const handleSendMessage = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!inputValue.trim()) return;
+
+  // 更新本地状态（用于UI响应）
+  const newUserMessage: Message = { role: "user", content: inputValue };
+  setCurrentMessages([...currentMessages, newUserMessage]);
+  setInputValue("");
+
+  try {
+    // 保存用户消息到数据库
+    await addMessage(currentConversationId, "user", inputValue);
+    
+    // 模拟AI回复
+    const assistantContent = "我已收到您的消息，这是一个模拟回复。在实际应用中，这里会连接到OpenAI API获取真实回复。";
+    
+    // 保存AI回复到数据库
+    await addMessage(currentConversationId, "assistant", assistantContent);
+    
+    // 更新本地状态（添加AI回复）
+    setCurrentMessages(prev => [...prev, { role: "assistant", content: assistantContent }]);
+  } catch (error) {
+    console.error("发送消息时出错", error);
+  }
+};
+```
