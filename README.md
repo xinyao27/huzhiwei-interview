@@ -2,6 +2,18 @@
 
 本项目使用 DrizzleORM 和 SQLite 进行数据持久化存储。以下是数据库相关的使用说明：
 
+### 环境变量配置
+
+项目使用环境变量来配置AI连接。请按照以下步骤进行配置：
+
+1. 在项目根目录中复制 `.env.example` 文件为 `.env.local`
+2. 根据需要修改 `.env.local` 文件中的值
+
+主要的环境变量包括：
+
+- `OPENAI_API_BASE_URL`: OpenAI API的基础URL
+- `OPENAI_API_KEY`: OpenAI API的密钥
+
 ### 数据库结构
 
 数据库包含以下表：

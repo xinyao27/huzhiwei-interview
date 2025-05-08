@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
 import { handle } from 'hono/vercel';
+import { createOpenAI } from '@ai-sdk/openai';
+import { CoreMessage, streamText } from "ai";
 
 const app = new Hono().basePath('/api');
 
@@ -15,18 +17,21 @@ app.get('/agent', async (c) => {
 // 处理agent请求
 app.post('/agent', async (c) => {
   try {
-    const { message } = await c.req.json();
+    const { messages }: { messages: CoreMessage[] } = await c.req.json();
+    const slicedMessages = messages.slice(-5);
+    console.log(slicedMessages);
     
-    if (!message) {
-      return c.json({ error: '消息不能为空' }, { status: 400 });
-    }
-    
-    // 这里可以添加实际的agent处理逻辑
-    
-    return c.json({
-      reply: `您的消息已收到: ${message}`,
-      timestamp: new Date().toISOString()
+    const openai = createOpenAI({
+      baseURL: process.env.OPENAI_API_BASE_URL, 
     });
+    
+    const result = await streamText({
+      model: openai("gpt-4.1"),
+      system: "你是一个AI助手，请根据用户的问题给出准确回答。",
+      messages: slicedMessages,
+    });
+    
+    return result.toDataStreamResponse();
   } catch (error) {
     console.error('处理agent请求失败', error);
     return c.json(
