@@ -54,8 +54,8 @@ npm run db:seed
 ```
 http://localhost:3000/api/init-db
 ```
-# 完成数据库初始化后，执行
-```
+### 完成数据库初始化后，执行
+
 npm run dev
 ```
 
