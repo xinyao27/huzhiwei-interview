@@ -252,39 +252,13 @@ app.post('/agent', async (c) => {
         }
         console.log('收集到的完整AI回复:', fullContent);
         // 保存完整响应到数据库
-        if (fullContent.trim()) {
-          // 处理fullContent，保留真正的换行符并确保代码块格式正确
-          // 注意：LLM生成的Markdown代码块需要三个反引号和换行才能正确显示
-          
-          // 解析和修复代码块
-          let processedContent = fullContent;
-          
-          if (processedContent.includes('```')) {
-            // 匹配代码块的正则表达式
-            const codeBlockRegex = /```(\w*)([\s\S]*?)```/g;
-            
-            processedContent = processedContent.replace(codeBlockRegex, (match, language, codeContent) => {
-              // 确保代码内容有适当的换行
-              let fixedCode = codeContent;
-              
-              // 添加代码块开始的换行
-              if (!fixedCode.startsWith('\n')) {
-                fixedCode = '\n' + fixedCode;
-              }
-              
-              // 确保代码块结束前有换行
-              if (!fixedCode.endsWith('\n')) {
-                fixedCode += '\n';
-              }          
-              return '```' + language + fixedCode + '```';
-            });
-          }         
+        if (fullContent.trim()) { 
           await db
             .insert(messages)
             .values({
               conversationId,
               role: 'assistant',
-              content: processedContent
+              content: fullContent.trim()
             });
             
           // 更新对话的updatedAt时间
