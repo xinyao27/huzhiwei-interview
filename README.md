@@ -48,15 +48,14 @@ npm run db:migrate
 
 # 填充示例数据
 npm run db:seed
+
+# 完成数据库初始化后，执行
+npm run dev
 ```
 
 或者，也可以通过访问以下URL自动初始化数据库：
 ```
 http://localhost:3000/api/init-db
-```
-### 完成数据库初始化后，执行
-
-npm run dev
 ```
 
 ### API端点
