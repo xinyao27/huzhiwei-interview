@@ -9,8 +9,6 @@
 - `conversations`: 存储对话信息
   - `id`: 对话ID
   - `title`: 对话标题
-  - `type`: 对话类型（可以是 'date' 或 undefined）
-  - `icon`: 图标类型（例如 'bot', 'pen' 等）
   - `createdAt`: 创建时间
   - `updatedAt`: 更新时间
 

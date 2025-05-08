@@ -1,20 +1,17 @@
-import { NextResponse } from "next/server";
+import { Hono } from 'hono';
+import { handle } from 'hono/vercel';
 import { db, conversations, messages } from "@/lib/db";
 import { eq } from "drizzle-orm";
 
-interface RouteParams {
-  params: {
-    id: string;
-  };
-}
+const app = new Hono().basePath('/api');
 
 // 获取特定对话
-export async function GET(request: Request, { params }: RouteParams) {
+app.get('/conversations/:id', async (c) => {
   try {
-    const id = Number(params.id);
+    const id = Number(c.req.param('id'));
     
     if (isNaN(id)) {
-      return NextResponse.json(
+      return c.json(
         { error: "无效的对话ID" },
         { status: 400 }
       );
@@ -26,66 +23,74 @@ export async function GET(request: Request, { params }: RouteParams) {
       .where(eq(conversations.id, id));
       
     if (!conversation.length) {
-      return NextResponse.json(
+      return c.json(
         { error: "对话不存在" },
         { status: 404 }
       );
     }
     
-    return NextResponse.json(conversation[0]);
+    return c.json(conversation[0]);
   } catch (error) {
     console.error("获取对话失败", error);
-    return NextResponse.json(
+    return c.json(
       { error: "获取对话失败" },
       { status: 500 }
     );
   }
-}
+});
 
 // 更新对话
-export async function PUT(request: Request, { params }: RouteParams) {
+app.put('/conversations/:id', async (c) => {
   try {
-    const id = Number(params.id);
+    const id = Number(c.req.param('id'));
     
     if (isNaN(id)) {
-      return NextResponse.json(
+      return c.json(
         { error: "无效的对话ID" },
         { status: 400 }
       );
     }
     
-    const { title, type, icon } = await request.json();
+    const body = await c.req.json();
+    const { title } = body;
+    
+    // 仅更新有效字段
+    const updateData: Record<string, any> = {};
+    if (title !== undefined) updateData.title = title;
+    
+    // 检查请求中是否包含其他可用字段并添加到更新对象中
+    // 如果表结构支持这些字段，可以将它们添加到更新对象
     
     const result = await db
       .update(conversations)
-      .set({ title, type, icon })
+      .set(updateData)
       .where(eq(conversations.id, id))
       .returning();
       
     if (!result.length) {
-      return NextResponse.json(
+      return c.json(
         { error: "对话不存在" },
         { status: 404 }
       );
     }
     
-    return NextResponse.json(result[0]);
+    return c.json(result[0]);
   } catch (error) {
     console.error("更新对话失败", error);
-    return NextResponse.json(
+    return c.json(
       { error: "更新对话失败" },
       { status: 500 }
     );
   }
-}
+});
 
 // 删除对话
-export async function DELETE(request: Request, { params }: RouteParams) {
+app.delete('/conversations/:id', async (c) => {
   try {
-    const id = Number(params.id);
+    const id = Number(c.req.param('id'));
     
     if (isNaN(id)) {
-      return NextResponse.json(
+      return c.json(
         { error: "无效的对话ID" },
         { status: 400 }
       );
@@ -98,18 +103,23 @@ export async function DELETE(request: Request, { params }: RouteParams) {
       .returning();
       
     if (!result.length) {
-      return NextResponse.json(
+      return c.json(
         { error: "对话不存在" },
         { status: 404 }
       );
     }
     
-    return NextResponse.json({ success: true });
+    return c.json({ success: true });
   } catch (error) {
     console.error("删除对话失败", error);
-    return NextResponse.json(
+    return c.json(
       { error: "删除对话失败" },
       { status: 500 }
     );
   }
-} 
+});
+
+export const GET = handle(app);
+export const POST = handle(app);
+export const PUT = handle(app);
+export const DELETE = handle(app); 
