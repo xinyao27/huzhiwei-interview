@@ -253,12 +253,64 @@ app.post('/agent', async (c) => {
         console.log('收集到的完整AI回复:', fullContent);
         // 保存完整响应到数据库
         if (fullContent.trim()) {
+          // 处理fullContent，保留真正的换行符并确保代码块格式正确
+          // 注意：LLM生成的Markdown代码块需要三个反引号和换行才能正确显示
+          
+          // 解析和修复代码块
+          let processedContent = fullContent;
+          
+          // 1. 检测和处理可能的代码块
+          if (processedContent.includes('```')) {
+            // 匹配代码块的正则表达式
+            const codeBlockRegex = /```(\w*)([\s\S]*?)```/g;
+            
+            processedContent = processedContent.replace(codeBlockRegex, (match, language, codeContent) => {
+              // 确保代码内容有适当的换行
+              let fixedCode = codeContent;
+              
+              // 添加代码块开始的换行
+              if (!fixedCode.startsWith('\n')) {
+                fixedCode = '\n' + fixedCode;
+              }
+              
+              // 确保代码块结束前有换行
+              if (!fixedCode.endsWith('\n')) {
+                fixedCode += '\n';
+              }
+              
+              // 代码行之间应该有换行
+              // 针对JavaScript等常见语言的模式
+              fixedCode = fixedCode
+                // 函数定义后缺少换行
+                .replace(/\{(?!\s*\n)/g, '{\n')
+                // 语句结束后缺少换行
+                .replace(/;(?!\s*\n)/g, ';\n');
+              
+              // 处理常见代码行开始的模式，确保它们前面有换行
+              const commonLineStarts = [
+                'const ', 'let ', 'var ', 'function ', 'if ', 'for ', 'while ', 
+                'return ', 'class ', 'import ', 'export ', '//', 'console.'
+              ];
+              
+              for (const lineStart of commonLineStarts) {
+                const pattern = new RegExp(`([^\\n])${lineStart}`, 'g');
+                fixedCode = fixedCode.replace(pattern, `$1\n${lineStart}`);
+              }
+              
+              return '```' + language + fixedCode + '```';
+            });
+          }
+          
+          // 2. 处理一般文本中的换行
+          // 将\n转义字符替换为真实换行符
+          processedContent = processedContent.replace(/\\n/g, '\n');
+          
           await db
             .insert(messages)
             .values({
               conversationId,
               role: 'assistant',
-              content: fullContent
+              content: processedContent
             });
             
           // 更新对话的updatedAt时间

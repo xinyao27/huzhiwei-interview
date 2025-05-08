@@ -53,7 +53,74 @@ export async function GET(request: Request, context: RouteParams) {
       .where(eq(messages.conversationId, conversationId))
       .orderBy(messages.createdAt);
       
-    return NextResponse.json(conversationMessages);
+    // 处理消息内容，确保Markdown格式正确
+    const processedMessages = conversationMessages.map(message => {
+      if (message.role === 'assistant') {
+        // 处理AI助手消息中的Markdown内容
+        const content = message.content;
+        
+        // 判断是否需要处理
+        if (!content.includes('```') && !content.includes('\\n')) {
+          return message;
+        }
+        
+        let processedContent = content;
+        
+        // 处理代码块
+        if (content.includes('```')) {
+          // 匹配代码块的正则表达式
+          const codeBlockRegex = /```(\w*)([\s\S]*?)```/g;
+          
+          processedContent = processedContent.replace(codeBlockRegex, (match, language, codeContent) => {
+            // 确保代码内容有适当的换行
+            let fixedCode = codeContent.replace(/\\n/g, '\n');
+            
+            // 添加代码块开始的换行
+            if (!fixedCode.startsWith('\n')) {
+              fixedCode = '\n' + fixedCode;
+            }
+            
+            // 确保代码块结束前有换行
+            if (!fixedCode.endsWith('\n')) {
+              fixedCode += '\n';
+            }
+            
+            // 针对JavaScript等常见语言的模式，添加必要的换行
+            fixedCode = fixedCode
+              // 函数定义后缺少换行
+              .replace(/\{(?!\s*\n)/g, '{\n')
+              // 语句结束后缺少换行
+              .replace(/;(?!\s*\n)/g, ';\n');
+            
+            // 处理常见代码行开始的模式，确保它们前面有换行
+            const commonLineStarts = [
+              'const ', 'let ', 'var ', 'function ', 'if ', 'for ', 'while ', 
+              'return ', 'class ', 'import ', 'export ', '//', 'console.'
+            ];
+            
+            for (const lineStart of commonLineStarts) {
+              const pattern = new RegExp(`([^\\n])${lineStart}`, 'g');
+              fixedCode = fixedCode.replace(pattern, `$1\n${lineStart}`);
+            }
+            
+            return '```' + language + fixedCode + '```';
+          });
+        }
+        
+        // 处理普通文本中的转义换行符
+        if (processedContent.includes('\\n')) {
+          processedContent = processedContent.replace(/\\n/g, '\n');
+        }
+        
+        return {
+          ...message,
+          content: processedContent
+        };
+      }
+      return message;
+    });
+      
+    return NextResponse.json(processedMessages);
   } catch (error) {
     console.error("获取消息失败", error);
     return NextResponse.json(
