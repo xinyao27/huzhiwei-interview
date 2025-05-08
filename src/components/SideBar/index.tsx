@@ -74,7 +74,6 @@ export default function Sidebar({
       </Button>
     )
   }
-
   return (
     <div className="w-[280px] h-full bg-background border-r flex flex-col overflow-hidden">
       <div className="flex items-center p-3 border-b">

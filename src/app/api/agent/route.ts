@@ -3,6 +3,9 @@ import { handle } from 'hono/vercel';
 import { createOpenAI } from '@ai-sdk/openai';
 import { z } from 'zod';
 import { CoreMessage, streamText } from "ai";
+import { db, conversations, messages } from "@/lib/db";
+import { eq, and } from "drizzle-orm";
+import { sql } from 'drizzle-orm';
 
 const app = new Hono().basePath('/api');
 
@@ -55,18 +58,156 @@ const getCurrentTimeTool = {
   }
 };
 
+// 获取消息内容的文本表示
+function getMessageContent(message: CoreMessage): string {
+  if (typeof message.content === 'string') {
+    return message.content;
+  } else if (Array.isArray(message.content)) {
+    // 尝试提取文本部分
+    const textParts = message.content
+      .filter(part => 'text' in part)
+      .map(part => 'text' in part ? part.text : '');
+    return textParts.join(' ');
+  }
+  return '未知内容';
+}
+
 // 处理agent请求
 app.post('/agent', async (c) => {
   try {
-    const { messages }: { messages: CoreMessage[] } = await c.req.json();
-    const slicedMessages = messages.slice(-5);
-    console.log(slicedMessages);
+    const { messages: requestMessages, id, isRegenerating }: { 
+      messages: CoreMessage[], 
+      id?: string,
+      isRegenerating?: boolean 
+    } = await c.req.json();
+    const slicedMessages = requestMessages.slice(-5);
+    console.log(slicedMessages, { id, isRegenerating });
+    
+    // 处理对话数据库操作
+    let conversationId: number;
+    
+    if (id) {
+      // 尝试将ID转换为数字
+      conversationId = Number(id);
+      
+      if (isNaN(conversationId)) {
+        return c.json(
+          { error: "无效的对话ID" },
+          { status: 400 }
+        );
+      }
+      
+      // 检查对话是否存在
+      const existingConversation = await db
+        .select()
+        .from(conversations)
+        .where(eq(conversations.id, conversationId));
+        
+      if (!existingConversation.length) {
+        // 创建对话记录
+        const firstMessage = slicedMessages[0];
+        const title = firstMessage ? getMessageContent(firstMessage).substring(0, 50) : "新对话";
+        const result = await db
+          .insert(conversations)
+          .values({ title })
+          .returning();
+          
+        conversationId = result[0].id;
+      } else {
+        // 更新对话的updatedAt时间
+        await db
+          .update(conversations)
+          .set({ updatedAt: sql`(strftime('%s', 'now'))` })
+          .where(eq(conversations.id, conversationId));
+          
+        // 如果是重新生成操作，删除最后的AI回复
+        if (isRegenerating === true) {
+          // 获取当前对话中的最后一条消息
+          const lastMessages = await db
+            .select()
+            .from(messages)
+            .where(eq(messages.conversationId, conversationId))
+            .orderBy(sql`id DESC`)
+            .limit(1);
+            
+          // 如果最后一条是AI回复，则删除
+          if (lastMessages.length > 0 && lastMessages[0].role === 'assistant') {
+            await db
+              .delete(messages)
+              .where(eq(messages.id, lastMessages[0].id));
+            console.log('检测到重新生成操作，已删除旧的AI回复:', lastMessages[0].id);
+          }
+        }
+        // 保留之前的检测逻辑作为备用，以防isRegenerating标记不存在
+        else if (slicedMessages.length > 0 && slicedMessages[slicedMessages.length - 1].role === 'user') {
+          // 获取当前对话中的最后两条消息
+          const lastMessages = await db
+            .select()
+            .from(messages)
+            .where(eq(messages.conversationId, conversationId))
+            .orderBy(sql`id DESC`)
+            .limit(2);
+            
+          // 如果最后一条是AI回复，且倒数第二条与当前提交的最后一条用户消息相同，则删除最后的AI回复
+          if (lastMessages.length >= 2 && 
+              lastMessages[0].role === 'assistant' && 
+              lastMessages[1].role === 'user' && 
+              lastMessages[1].content === getMessageContent(slicedMessages[slicedMessages.length - 1])) {
+            await db
+              .delete(messages)
+              .where(eq(messages.id, lastMessages[0].id));
+            console.log('检测到可能的重新生成操作，已删除旧的AI回复:', lastMessages[0].id);
+          }
+        }
+      }
+    } else if (slicedMessages.length > 0) {
+      // 没有指定ID但有消息，创建新对话
+      const firstMessage = slicedMessages[0];
+      const title = firstMessage ? getMessageContent(firstMessage).substring(0, 50) : "新对话";
+      const result = await db
+        .insert(conversations)
+        .values({ title })
+        .returning();
+        
+      conversationId = result[0].id;
+    } else {
+      return c.json(
+        { error: "无消息内容" },
+        { status: 400 }
+      );
+    }
+    
+    // 将用户消息保存到数据库
+    for (const message of slicedMessages) {
+      const content = getMessageContent(message);
+      
+      // 检查消息是否已经存在
+      const existingMessages = await db
+        .select()
+        .from(messages)
+        .where(and(
+          eq(messages.conversationId, conversationId),
+          eq(messages.role, message.role as "user" | "assistant"),
+          eq(messages.content, content)
+        ));
+        
+      if (existingMessages.length === 0) {
+        await db
+          .insert(messages)
+          .values({
+            conversationId,
+            role: message.role as "user" | "assistant",
+            content
+          });
+      }
+    }
     
     const openai = createOpenAI({
       baseURL: process.env.OPENAI_API_BASE_URL, 
     });
     
-    const result = await streamText({
+    // 使用Vercel AI SDK的streamText函数
+    const streamResponse = await streamText({
       model: openai("gpt-4.1"),
       system: "你是一个AI助手，请根据用户的问题给出准确回答。",
       messages: slicedMessages,
@@ -77,7 +218,61 @@ app.post('/agent', async (c) => {
       maxSteps: 10,
     });
     
-    return result.toDataStreamResponse();
+    // 转换为DataStream响应
+    const response = streamResponse.toDataStreamResponse();
+    
+    // 在后台将AI的回复保存到数据库
+    // 注意：这是一个不等待的操作，因为我们已经返回了流式响应
+    (async () => {
+      try {
+        // 读取响应流并收集完整内容
+        const reader = streamResponse.toDataStream().getReader();
+        let fullContent = '';
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          // 解析value以获取内容
+          // 这里假设value是一个包含文本的数据块
+          const chunk = new TextDecoder().decode(value);
+          let chunkContent = '';
+          console.log('chunk', chunk);
+          try {
+            // 尝试解析JSON格式的数据
+            const lines = chunk.split('\n').filter(line => line.trim().startsWith('0:'));
+            for (const line of lines) {
+                chunkContent += line.replace('0:', '').replace(/^"|"$/g, '');
+            }
+          } catch (e) {
+            console.warn('解析流数据失败:', e);
+          }
+          
+          fullContent += chunkContent;
+        }
+        console.log('收集到的完整AI回复:', fullContent);
+        // 保存完整响应到数据库
+        if (fullContent.trim()) {
+          await db
+            .insert(messages)
+            .values({
+              conversationId,
+              role: 'assistant',
+              content: fullContent
+            });
+            
+          // 更新对话的updatedAt时间
+          await db
+            .update(conversations)
+            .set({ updatedAt: sql`(strftime('%s', 'now'))` })
+            .where(eq(conversations.id, conversationId));
+        }
+      } catch (err) {
+        console.error('保存AI回复到数据库失败:', err);
+      }
+    })();
+    
+    return response;
   } catch (error) {
     console.error('处理agent请求失败', error);
     return c.json(

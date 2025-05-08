@@ -3,15 +3,28 @@ import { db, conversations, messages } from "@/lib/db";
 import { eq } from "drizzle-orm";
 
 interface RouteParams {
-  params: {
+  params: Promise<{
+    id: string;
+  }> | {
     id: string;
   };
 }
 
 // 获取特定对话的所有消息
-export async function GET(request: Request, { params }: RouteParams) {
+export async function GET(request: Request, context: RouteParams) {
   try {
-    const conversationId = Number(params.id);
+    // 确保params是可用的
+    const params = await context.params;
+    const id = params?.id;
+    
+    if (!id) {
+      return NextResponse.json(
+        { error: "缺少对话ID" },
+        { status: 400 }
+      );
+    }
+    
+    const conversationId = Number(id);
     
     if (isNaN(conversationId)) {
       return NextResponse.json(
@@ -51,9 +64,20 @@ export async function GET(request: Request, { params }: RouteParams) {
 }
 
 // 添加消息到对话
-export async function POST(request: Request, { params }: RouteParams) {
+export async function POST(request: Request, context: RouteParams) {
   try {
-    const conversationId = Number(params.id);
+    // 确保params是可用的
+    const params = await context.params;
+    const id = params?.id;
+    
+    if (!id) {
+      return NextResponse.json(
+        { error: "缺少对话ID" },
+        { status: 400 }
+      );
+    }
+    
+    const conversationId = Number(id);
     
     if (isNaN(conversationId)) {
       return NextResponse.json(
