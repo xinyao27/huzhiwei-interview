@@ -206,6 +206,21 @@ app.post('/agent', async (c) => {
       baseURL: process.env.OPENAI_API_BASE_URL, 
     });
     
+    // 尝试从原始请求中获取abort信号
+    // Hono的请求对象中，可以通过raw属性访问原始的Request对象
+    let abortSignal;
+    try {
+      const originalRequest = c.req.raw;
+      if (originalRequest && originalRequest.signal) {
+        abortSignal = originalRequest.signal;
+        console.log('成功获取请求的abort信号');
+      } else {
+        console.log('原始请求对象中没有signal属性，将不支持中断流');
+      }
+    } catch (error) {
+      console.warn('获取abort信号失败:', error);
+    }
+    
     // 使用Vercel AI SDK的streamText函数
     const streamResponse = await streamText({
       model: openai("gpt-4.1"),
@@ -216,6 +231,8 @@ app.post('/agent', async (c) => {
       },
       toolChoice: "auto",
       maxSteps: 10,
+      // 仅当成功获取到signal时才传递
+      ...(abortSignal ? { abortSignal } : {})
     });
     
     // 转换为DataStream响应
@@ -228,47 +245,110 @@ app.post('/agent', async (c) => {
         // 读取响应流并收集完整内容
         const reader = streamResponse.toDataStream().getReader();
         let fullContent = '';
+        let messageId: number | null = null;
+        let isAborted = false;
         
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        // 定义保存内容的函数
+        const saveContent = async (content: string, isInterrupted: boolean = false) => {
+          if (!content.trim()) return;
           
-          // 解析value以获取内容
-          // 这里假设value是一个包含文本的数据块
-          const chunk = new TextDecoder().decode(value);
-          let chunkContent = '';
-          console.log('chunk', chunk);
           try {
-            // 尝试解析JSON格式的数据
-            const lines = chunk.split('\n').filter(line => line.trim().startsWith('0:'));
-            for (const line of lines) {
-                chunkContent += line.replace('0:', '').replace(/^"|"$/g, '');
+            // 如果已经有保存过的消息ID，就更新它
+            if (messageId !== null) {
+              await db
+                .update(messages)
+                .set({ 
+                  content: content.trim(),
+                  // 标记是否被中断，需要在messages表中添加此字段
+                  // isInterrupted: isInterrupted
+                })
+                .where(eq(messages.id, messageId));
+            } else {
+              // 否则插入新消息
+              const result = await db
+                .insert(messages)
+                .values({
+                  conversationId,
+                  role: 'assistant',
+                  content: content.trim(),
+                  // isInterrupted: isInterrupted
+                })
+                .returning();
+              
+              // 保存消息ID以便后续更新
+              if (result && result.length > 0) {
+                messageId = result[0].id;
+              }
             }
-          } catch (e) {
-            console.warn('解析流数据失败:', e);
-          }
-          
-          fullContent += chunkContent;
-        }
-        console.log('收集到的完整AI回复:', fullContent);
-        // 保存完整响应到数据库
-        if (fullContent.trim()) { 
-          await db
-            .insert(messages)
-            .values({
-              conversationId,
-              role: 'assistant',
-              content: fullContent.trim()
-            });
             
-          // 更新对话的updatedAt时间
-          await db
-            .update(conversations)
-            .set({ updatedAt: sql`(strftime('%s', 'now'))` })
-            .where(eq(conversations.id, conversationId));
+            // 更新对话的updatedAt时间
+            await db
+              .update(conversations)
+              .set({ updatedAt: sql`(strftime('%s', 'now'))` })
+              .where(eq(conversations.id, conversationId));
+            
+            console.log(`已保存${isInterrupted ? '(被中断)' : ''}内容，长度: ${content.length}`);
+          } catch (error) {
+            console.error('保存内容失败:', error);
+          }
+        };
+        
+        try {
+          while (true) {
+            try {
+              // 如果已经被中断，不再继续读取
+              if (isAborted) break;
+              
+              const { done, value } = await reader.read();
+              
+              if (done) {
+                // 流结束，保存完整内容
+                await saveContent(fullContent);
+                break;
+              }
+              
+              // 解析value以获取内容
+              const chunk = new TextDecoder().decode(value);
+              let chunkContent = '';
+              console.log('chunk', chunk);
+              try {
+                // 尝试解析JSON格式的数据
+                const lines = chunk.split('\n').filter(line => line.trim().startsWith('0:'));
+                for (const line of lines) {
+                    chunkContent += line.replace('0:', '').replace(/^"|"$/g, '');
+                }
+              } catch (e) {
+                console.warn('解析流数据失败:', e);
+              }
+              
+              fullContent += chunkContent;
+            } catch (error) {
+              // 捕获可能的AbortError或其他错误，这通常是由于用户中断引起的
+              console.log('流式响应被中断或出现错误:', error);
+              
+              // 标记为已中断
+              isAborted = true;
+              
+              // 保存截至中断时的内容，并标记为被中断
+              await saveContent(fullContent, true);
+              
+              break;
+            }
+          }
+        } finally {
+          // 确保在任何情况下都关闭reader
+          try {
+            if (reader.cancel) {
+              await reader.cancel('请求结束');
+            }
+          } catch (error) {
+            console.warn('关闭reader失败:', error);
+          }
         }
+        
+        console.log('流式响应处理完成，内容长度:', fullContent.length);
       } catch (err) {
-        console.error('保存AI回复到数据库失败:', err);
+        console.error('处理流式响应失败:', err);
       }
     })();
     

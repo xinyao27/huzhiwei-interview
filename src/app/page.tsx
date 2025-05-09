@@ -27,6 +27,7 @@ export default function ChatPage() {
     startNewChat,
     handleDeleteConversation,
     handleRegenerate,
+    handleStopGeneration,
   } = useChatStore()
 
   // 添加日志，检查初始加载状态
@@ -70,6 +71,7 @@ export default function ChatPage() {
           handleSendMessage={handleSendMessage}
           isSidebarOpen={isSidebarOpen}
           handleRegenerate={handleRegenerate}
+          handleStopGeneration={handleStopGeneration}
           isLoading={isLoading}
         />
       )}

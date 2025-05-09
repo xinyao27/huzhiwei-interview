@@ -206,7 +206,8 @@ export function useChatStore() {
     isLoading,
     append,
     reload,
-    setMessages
+    setMessages,
+    stop
   } = useChat({
     api: "/api/agent", // 使用agent API端点
     id: currentConversationId?.toString(),
@@ -309,6 +310,12 @@ export function useChatStore() {
       }
     });
   }, [reload, currentConversationId])
+  
+  // 停止生成回复
+  const handleStopGeneration = useCallback(() => {
+    // 使用Vercel的stop函数停止生成
+    stop();
+  }, [stop])
 
   // 创建新对话
   const handleNewChat = useCallback(async (message: string) => {
@@ -609,5 +616,6 @@ export function useChatStore() {
     startNewChat,
     handleDeleteConversation,
     handleRegenerate,
+    handleStopGeneration,
   }
 }

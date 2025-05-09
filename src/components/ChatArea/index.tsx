@@ -3,7 +3,7 @@
 import type React from "react"
 
 import { useState, useRef } from "react"
-import { RotateCcw, Send, Plus, ArrowDown } from "lucide-react"
+import { RotateCcw, Send, Plus, ArrowDown, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -24,6 +24,7 @@ interface ChatAreaProps {
   handleSendMessage: (e: React.FormEvent) => void
   isSidebarOpen: boolean
   handleRegenerate?: () => void
+  handleStopGeneration?: () => void
   isLoading?: boolean
 }
 
@@ -34,6 +35,7 @@ export default function ChatArea({
   handleSendMessage,
   isSidebarOpen,
   handleRegenerate,
+  handleStopGeneration,
   isLoading = false,
 }: ChatAreaProps) {
   // 使用自定义 hook 处理滚动逻辑
@@ -150,18 +152,30 @@ export default function ChatArea({
               }}
               disabled={isLoading}
             />
-            <Button
-              type="submit"
-              size="icon"
-              variant="ghost"
-              className={cn(
-                "absolute right-2 top-1/2 transform -translate-y-1/2 h-7 w-7",
-                !inputValue.trim() && "text-muted-foreground opacity-50",
-              )}
-              disabled={!inputValue.trim() || isLoading}
-            >
-              <Send className="h-4 w-4" />
-            </Button>
+            {isLoading ? (
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="absolute right-2 top-1/2 transform -translate-y-1/2 h-7 w-7 text-red-500 hover:text-red-700"
+                onClick={handleStopGeneration}
+              >
+                <Square className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button
+                type="submit"
+                size="icon"
+                variant="ghost"
+                className={cn(
+                  "absolute right-2 top-1/2 transform -translate-y-1/2 h-7 w-7",
+                  !inputValue.trim() && "text-muted-foreground opacity-50",
+                )}
+                disabled={!inputValue.trim() || isLoading}
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </form>
       </div>
